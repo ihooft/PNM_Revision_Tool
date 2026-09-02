@@ -15,7 +15,9 @@ namespace PNM_Revision_Tool
     {
         private static readonly string[] RevBlockNames =
         {
-            "REV BLOCK"
+            "REV BLOCK",
+            "CIREVBLK",
+            "CI42"
         };
 
         private static readonly string[] StatusStampNames =
@@ -565,6 +567,7 @@ namespace PNM_Revision_Tool
                             transaction,
                             sheet.LayoutName);
 
+                    // Find only the configured revision block names.
                     List<ObjectId> revisionBlocks =
                         FindBlockReferencesInLayout(
                             layoutBlockTableRecordId,

@@ -61,5 +61,19 @@ namespace PNM_Revision_Tool
             get;
             init;
         } = string.Empty;
+
+        public bool IsEmpty()
+        {
+            return string.IsNullOrWhiteSpace(RevisionNumber) &&
+                   string.IsNullOrWhiteSpace(Date) &&
+                   string.IsNullOrWhiteSpace(DrafterInitials) &&
+                   string.IsNullOrWhiteSpace(Description1) &&
+                   string.IsNullOrWhiteSpace(Description2) &&
+                   string.IsNullOrWhiteSpace(Description3) &&
+                   string.IsNullOrWhiteSpace(CheckedInitials) &&
+                   string.IsNullOrWhiteSpace(OkayedInitials) &&
+                   string.IsNullOrWhiteSpace(ApprovedInitials) &&
+                   string.IsNullOrWhiteSpace(StatusStamp);
+        }
     }
 }

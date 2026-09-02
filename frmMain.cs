@@ -157,6 +157,20 @@ namespace PNM_Revision_Tool
                     cbxStamp.Text
             };
 
+            // If the user did not enter any values, do not proceed with
+            // opening or processing drawings to avoid unnecessary work.
+            if (values.IsEmpty())
+            {
+                MessageBox.Show(
+                    this,
+                    "No revision values were entered. Nothing to do.",
+                    "PNM Revision Tool",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+
+                return;
+            }
+
             cmbApplyShtSet.Enabled = false;
             UseWaitCursor = true;
 
@@ -217,12 +231,9 @@ namespace PNM_Revision_Tool
                 $"Sheets skipped: " +
                 $"{summary.SkippedSheets}");
 
-            if (summary.RevisionBlocksNotFound > 0)
-            {
-                message.AppendLine(
-                    $"Sheets without REV BLOCK: " +
-                    $"{summary.RevisionBlocksNotFound}");
-            }
+            // The count of sheets missing REV BLOCK is intentionally omitted
+            // from the summary message to reduce verbosity. Details (if any)
+            // are available in the txt log.
 
             // Detailed list of sheets missing REV BLOCK removed to reduce
             // verbosity in the summary message. The count is still shown
