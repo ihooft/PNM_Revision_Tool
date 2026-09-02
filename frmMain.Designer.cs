@@ -258,6 +258,7 @@
             txtLog.Location = new Point(12, 349);
             txtLog.Multiline = true;
             txtLog.Name = "txtLog";
+            txtLog.ScrollBars = ScrollBars.Vertical;
             txtLog.Size = new Size(306, 216);
             txtLog.TabIndex = 26;
             // 

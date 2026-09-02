@@ -119,6 +119,12 @@ namespace PNM_Revision_Tool
              */
             HashSet<string> warnedOpenDrawings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            // Keep opened Database instances for the duration of the whole
+            // processing run and save/close them only after all sheets
+            // have been processed. This avoids repeatedly reading and
+            // writing large drawing files which is slow on big projects.
+            Dictionary<string, Database> openDatabases = new Dictionary<string, Database>(StringComparer.OrdinalIgnoreCase);
+
             foreach (SheetEntry sheet in sheets)
             {
                 currentSheet++;
@@ -136,30 +142,70 @@ namespace PNM_Revision_Tool
                     summary.SkippedDrawings.Add(
                         sheet.DrawingFile);
 
+                    // Log each skipped sheet to the txtlog so the user can
+                    // review which sheets were skipped after a batch run.
+                    logMessage?.Invoke(
+                        $"Skipped sheet: {sheet.SheetTitle} (drawing open) - {sheet.DrawingFile}");
+
                     if (warnedOpenDrawings.Add(
                             sheet.DrawingFile))
                     {
-                        MessageBox.Show(
-                            "The following drawing is " +
-                            "currently open in AutoCAD " +
-                            "and will be skipped:" +
-                            Environment.NewLine +
-                            Environment.NewLine +
-                            sheet.DrawingFile,
-                            "PNM Revision Tool",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Warning);
+                        // Log instead of showing a message box when skipping
+                        // drawings that are already open in AutoCAD. Message
+                        // boxes for every skipped sheet slow batch runs.
+                        logMessage?.Invoke(
+                            $"Skipping open drawing: {sheet.DrawingFile}");
                     }
 
                     System.Windows.Forms.Application.DoEvents();
                     continue;
                 }
 
+                Database providedDb = null;
+
+                // Open the drawing once and reuse the Database for all
+                // sheets that reference the same file during this run.
+                if (!openDatabases.TryGetValue(sheet.DrawingFile, out providedDb))
+                {
+                    try
+                    {
+                        providedDb = new Database(false, true);
+
+                        providedDb.ReadDwgFile(
+                            sheet.DrawingFile,
+                            FileOpenMode.OpenForReadAndWriteNoShare,
+                            true,
+                            string.Empty);
+
+                        providedDb.CloseInput(true);
+
+                        openDatabases[sheet.DrawingFile] = providedDb;
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(
+                            BuildSheetMessage(
+                                "Error opening drawing:" +
+                                Environment.NewLine +
+                                Environment.NewLine +
+                                ex.Message,
+                                sheet),
+                            "PNM Revision Tool",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+
+                        summary.FailedSheets++;
+                        System.Windows.Forms.Application.DoEvents();
+                        continue;
+                    }
+                }
+
                 SheetProcessingResult result =
                     ProcessSheet(
                         sheet,
                         values,
-                        logMessage);
+                        logMessage,
+                        providedDb);
 
                 if (result.WasProcessed)
                 {
@@ -180,6 +226,32 @@ namespace PNM_Revision_Tool
                 }
 
                 System.Windows.Forms.Application.DoEvents();
+            }
+
+            // Save and close all databases opened during this run.
+            foreach (KeyValuePair<string, Database> kvp in openDatabases)
+            {
+                try
+                {
+                    kvp.Value.SaveAs(
+                        kvp.Key,
+                        kvp.Value.OriginalFileVersion);
+                }
+                catch (Exception ex)
+                {
+                    logMessage?.Invoke($"Failed to save '{kvp.Key}': {ex.Message}");
+                }
+                finally
+                {
+                    try
+                    {
+                        kvp.Value.Dispose();
+                    }
+                    catch
+                    {
+                        // swallow dispose exceptions
+                    }
+                }
             }
 
             updateProgress?.Invoke(
@@ -365,13 +437,17 @@ namespace PNM_Revision_Tool
         private static SheetProcessingResult ProcessSheet(
             SheetEntry sheet,
             RevisionFormValues values,
-            Action<string> logMessage)
+            Action<string> logMessage,
+            Database providedDatabase = null)
         {
             if (!File.Exists(sheet.DrawingFile))
             {
                 ShowSheetWarning(
                     "Drawing file not found.",
                     sheet);
+
+                logMessage?.Invoke(
+                    $"Skipped sheet: {sheet.SheetTitle} (drawing not found) - {sheet.DrawingFile}");
 
                 return new SheetProcessingResult
                 {
@@ -384,78 +460,57 @@ namespace PNM_Revision_Tool
             {
                 bool revisionBlockFound;
 
-                /*
-                 * This is an external or side database.
-                 *
-                 * The drawing is not opened in the AutoCAD document
-                 * window, so DocumentManager.Open, MDI activation,
-                 * DocumentLock, and CloseAndSave are not required.
-                 */
-                //using (Database database =
-                //       new Database(false, true))
-                //{
-                //    database.ReadDwgFile(
-                //        sheet.DrawingFile,
-                //        FileOpenMode
-                //            .OpenForReadAndWriteNoShare,
-                //        true,
-                //        string.Empty);
-
-                //    /*
-                //     * ReadDwgFile can use deferred loading.
-                //     * CloseInput forces any remaining drawing data
-                //     * to be loaded before overwriting the source.
-                //     */
-                //    database.CloseInput(true);
-
-                //    revisionBlockFound =
-                //        UpdateSheetLayout(
-                //            database,
-                //            sheet,
-                //            values);
-
-                //    /*
-                //     * Preserve the drawing's original DWG version
-                //     * instead of automatically upgrading it.
-                //     */
-                //    database.SaveAs(
-                //        sheet.DrawingFile,
-                //        database.OriginalFileVersion);
-                //}
-                using (Database database = new Database(false, true))
+                if (providedDatabase == null)
                 {
-                    database.ReadDwgFile(
-                        sheet.DrawingFile,
-                        FileOpenMode.OpenForReadAndWriteNoShare,
-                        true,
-                        string.Empty);
-
-                    database.CloseInput(true);
-
-                    Database previousDb =
-                        HostApplicationServices.WorkingDatabase;
-
-                    try
+                    // Open a temporary Database and save/close it immediately
+                    // after processing this sheet.
+                    using (Database database = new Database(false, true))
                     {
-                        HostApplicationServices.WorkingDatabase =
-                            database;
+                        database.ReadDwgFile(
+                            sheet.DrawingFile,
+                            FileOpenMode.OpenForReadAndWriteNoShare,
+                            true,
+                            string.Empty);
 
-                        revisionBlockFound =
-                            UpdateSheetLayout(
-                                database,
-                                sheet,
-                                values,
-                                logMessage);
-                    }
-                    finally
-                    {
-                        HostApplicationServices.WorkingDatabase =
-                            previousDb;
-                    }
+                        database.CloseInput(true);
 
-                    database.SaveAs(
-                        sheet.DrawingFile,
-                        database.OriginalFileVersion);
+                        Database previousDb =
+                            HostApplicationServices.WorkingDatabase;
+
+                        try
+                        {
+                            HostApplicationServices.WorkingDatabase =
+                                database;
+
+                            revisionBlockFound =
+                                UpdateSheetLayout(
+                                    database,
+                                    sheet,
+                                    values,
+                                    logMessage);
+                        }
+                        finally
+                        {
+                            HostApplicationServices.WorkingDatabase =
+                                previousDb;
+                        }
+
+                        database.SaveAs(
+                            sheet.DrawingFile,
+                            database.OriginalFileVersion);
+                    }
+                }
+                else
+                {
+                    // Use the provided cached Database; do not save/close
+                    // it here. It will be saved and closed after the whole
+                    // run completes.
+                    revisionBlockFound =
+                        UpdateSheetLayout(
+                            providedDatabase,
+                            sheet,
+                            values,
+                            logMessage);
                 }
 
                 return new SheetProcessingResult
@@ -589,6 +644,12 @@ namespace PNM_Revision_Tool
                                 layoutBlockTableRecordId,
                                 transaction,
                                 StatusStampNames);
+
+                        if (statusStampBlocks.Count == 0)
+                        {
+                            logMessage?.Invoke(
+                                $"STATUS STAMP not found: {sheet.SheetTitle}");
+                        }
 
                         foreach (ObjectId statusStampId
                                  in statusStampBlocks)

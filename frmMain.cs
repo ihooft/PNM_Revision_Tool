@@ -224,19 +224,9 @@ namespace PNM_Revision_Tool
                     $"{summary.RevisionBlocksNotFound}");
             }
 
-            if (summary.MissingRevisionBlocks.Count > 0)
-            {
-                message.AppendLine();
-                message.AppendLine(
-                    "Sheets without REV BLOCK:");
-
-                foreach (string item in
-                         summary.MissingRevisionBlocks
-                             .OrderBy(x => x))
-                {
-                    message.AppendLine(item);
-                }
-            }
+            // Detailed list of sheets missing REV BLOCK removed to reduce
+            // verbosity in the summary message. The count is still shown
+            // above if any were not found.
 
             if (summary.SkippedDrawings.Count > 0)
             {
