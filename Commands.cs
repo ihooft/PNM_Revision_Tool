@@ -8,7 +8,7 @@ namespace PNM_Revision_Tool
     public sealed class Commands
     {
         [CommandMethod(
-            "PNMREVISIONTOOL",
+            "PNM_REVISION_TOOL",
             CommandFlags.Session)]
         public void ShowRevisionTool()
         {
