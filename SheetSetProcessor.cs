@@ -151,15 +151,15 @@ namespace PNM_Revision_Tool
                     logMessage?.Invoke(
                         $"Skipped sheet: {sheet.SheetTitle} (drawing open) - {sheet.DrawingFile}");
 
-                    if (warnedOpenDrawings.Add(
-                            sheet.DrawingFile))
-                    {
-                        // Log instead of showing a message box when skipping
-                        // drawings that are already open in AutoCAD. Message
-                        // boxes for every skipped sheet slow batch runs.
-                        logMessage?.Invoke(
-                            $"Skipping open drawing: {sheet.DrawingFile}");
-                    }
+                    //if (warnedOpenDrawings.Add(
+                    //        sheet.DrawingFile))
+                    //{
+                    //    // Log instead of showing a message box when skipping
+                    //    // drawings that are already open in AutoCAD. Message
+                    //    // boxes for every skipped sheet slow batch runs.
+                    //    logMessage?.Invoke(
+                    //        $"Skipping open drawing: {sheet.DrawingFile}");
+                    //}
 
                     System.Windows.Forms.Application.DoEvents();
                     continue;
@@ -676,20 +676,54 @@ namespace PNM_Revision_Tool
                                 transaction,
                                 PlotAttNames);
 
+                        if (plotAttBlocks.Count == 0)
+                        {
+                            logMessage?.Invoke(
+                                $"Titleblock Attributes not found: {sheet.SheetTitle}");
+                        }
 
-                        Dictionary<string, string>
-                            plotAttributes =
-                                new Dictionary<string, string>(
-                                    StringComparer
-                                        .OrdinalIgnoreCase)
-                                {
-                                    ["PLOTREV#"] =
-                                        values.RevisionNumber
-                                };
 
                         foreach (ObjectId plotAttId
                                  in plotAttBlocks)
                         {
+                            // Determine the correct attribute tag to update
+                            // based on the effective block name. Some title
+                            // block variants use "REV#" instead of
+                            // "PLOTREV#".
+                            string effectiveName = string.Empty;
+
+                            try
+                            {
+                                if (transaction.GetObject(
+                                        plotAttId,
+                                        OpenMode.ForRead)
+                                    is BlockReference br)
+                                {
+                                    effectiveName =
+                                        GetEffectiveBlockName(
+                                            br,
+                                            transaction);
+                                }
+                            }
+                            catch
+                            {
+                                // If we can't determine the name, fall back
+                                // to the default attribute tag.
+                            }
+
+                            string attributeTag =
+                                string.Equals(
+                                    effectiveName,
+                                    "TBBLATT",
+                                    StringComparison.OrdinalIgnoreCase)
+                                    ? "REV#"
+                                    : "PLOTREV#";
+
+                            var plotAttributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                            {
+                                [attributeTag] = values.RevisionNumber
+                            };
+
                             UpdateAttributes(
                                 plotAttId,
                                 plotAttributes,
