@@ -17,7 +17,8 @@ namespace PNM_Revision_Tool
         {
             "REV BLOCK",
             "CIREVBLK",
-            "CI42"
+            "CI42",
+            "CMREVBLK"
         };
 
         private static readonly string[] StatusStampNames =
@@ -36,7 +37,8 @@ namespace PNM_Revision_Tool
             "OVGND_ATT",
             "GNDATT",
             "OVCND_ATT",
-            "CNDATT"
+            "CNDATT",
+            "TBBLATT"
         };
 
         private static bool IsDrawingOpen(string drawingFile)
