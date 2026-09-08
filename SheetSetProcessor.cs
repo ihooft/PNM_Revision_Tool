@@ -712,23 +712,20 @@ namespace PNM_Revision_Tool
                                 // to the default attribute tag.
                             }
 
-                            string attributeTag =
-                                string.Equals(
-                                    effectiveName,
-                                    "TBBLATT",
-                                    StringComparison.OrdinalIgnoreCase)
-                                    ? "REV#"
-                                    : "PLOTREV#";
-
+                            // Some titleblock variants use different attribute
+                            // tags for the revision value. Attempt to set the
+                            // common candidates so whichever tag exists will
+                            // be updated. Priority is not required because
+                            // UpdateAttributes will only modify tags that
+                            // actually exist on the block.
                             var plotAttributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                             {
-                                [attributeTag] = values.RevisionNumber
+                                ["REV#"] = values.RevisionNumber,
+                                ["PLOTREV#"] = values.RevisionNumber,
+                                ["GENREV#"] = values.RevisionNumber
                             };
 
-                            UpdateAttributes(
-                                plotAttId,
-                                plotAttributes,
-                                transaction);
+                            UpdateAttributes(plotAttId, plotAttributes, transaction);
                         }
                     }
 
