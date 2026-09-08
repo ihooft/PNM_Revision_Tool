@@ -38,7 +38,8 @@ namespace PNM_Revision_Tool
             "GNDATT",
             "OVCND_ATT",
             "CNDATT",
-            "TBBLATT"
+            "TBBLATT",
+            "GENATT"
         };
 
         private static bool IsDrawingOpen(string drawingFile)
