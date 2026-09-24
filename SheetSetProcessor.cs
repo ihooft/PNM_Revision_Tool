@@ -267,6 +267,419 @@ namespace PNM_Revision_Tool
             return summary;
         }
 
+        /// <summary>
+        /// Processes only the selected sheets from a sheet set file.
+        /// </summary>
+        /// <param name="dstFileName">The path to the sheet set (.dst) file.</param>
+        /// <param name="selectedSheets">The list of sheets to process.</param>
+        /// <param name="values">The revision form values to apply.</param>
+        /// <param name="updateProgress">Callback for progress updates.</param>
+        /// <param name="logMessage">Callback for logging messages.</param>
+        /// <returns>A ProcessingSummary with the results of the processing.</returns>
+        public static ProcessingSummary ProcessSelectedSheets(
+            string dstFileName,
+            List<SheetEntry> selectedSheets,
+            RevisionFormValues values,
+            Action<int, int, string> updateProgress,
+            Action<string> logMessage)
+        {
+            if (string.IsNullOrWhiteSpace(dstFileName))
+            {
+                throw new ArgumentException(
+                    "A sheet set file was not provided.",
+                    nameof(dstFileName));
+            }
+
+            if (!File.Exists(dstFileName))
+            {
+                throw new FileNotFoundException(
+                    "The selected sheet set file was not found.",
+                    dstFileName);
+            }
+
+            if (selectedSheets == null || selectedSheets.Count == 0)
+            {
+                throw new ArgumentException(
+                    "No sheets were selected for processing.",
+                    nameof(selectedSheets));
+            }
+
+            int totalSheets = selectedSheets.Count;
+            int currentSheet = 0;
+
+            updateProgress?.Invoke(
+                0,
+                totalSheets,
+                "Starting...");
+
+            ProcessingSummary summary =
+                new ProcessingSummary();
+
+            /*
+             * Do not deduplicate drawing filenames.
+             *
+             * Every sheet set entry is processed separately.
+             * If multiple sheets reference layouts in the same
+             * drawing, that drawing is read, modified, and saved
+             * separately for each sheet.
+             */
+            HashSet<string> warnedOpenDrawings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // Keep opened Database instances for the duration of the whole
+            // processing run and save/close them only after all sheets
+            // have been processed. This avoids repeatedly reading and
+            // writing large drawing files which is slow on big projects.
+            Dictionary<string, Database> openDatabases = new Dictionary<string, Database>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (SheetEntry sheet in selectedSheets)
+            {
+                currentSheet++;
+
+                updateProgress?.Invoke(
+                    currentSheet,
+                    totalSheets,
+                    sheet.SheetTitle);
+
+                if (IsDrawingOpen(sheet.DrawingFile))
+                {
+                    summary.SkippedSheets++;
+                    summary.SkippedDrawings.Add(sheet.DrawingFile);
+
+                    logMessage?.Invoke(
+                        $"Skipped: {sheet.SheetTitle} " +
+                        $"(drawing is open in AutoCAD)");
+
+                    continue;
+                }
+
+                Database providedDb = null;
+
+                // Open the drawing once and reuse the Database for all
+                // sheets that reference the same file during this run.
+                if (!openDatabases.TryGetValue(sheet.DrawingFile, out providedDb))
+                {
+                    try
+                    {
+                        providedDb = new Database(false, true);
+
+                        providedDb.ReadDwgFile(
+                            sheet.DrawingFile,
+                            FileOpenMode.OpenForReadAndWriteNoShare,
+                            true,
+                            string.Empty);
+
+                        providedDb.CloseInput(true);
+
+                        openDatabases[sheet.DrawingFile] = providedDb;
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(
+                            BuildSheetMessage(
+                                "Error opening drawing:" +
+                                Environment.NewLine +
+                                Environment.NewLine +
+                                ex.Message,
+                                sheet),
+                            "PNM Revision Tool",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+
+                        summary.FailedSheets++;
+                        System.Windows.Forms.Application.DoEvents();
+                        continue;
+                    }
+                }
+
+                SheetProcessingResult result =
+                    ProcessSheet(
+                        sheet,
+                        values,
+                        logMessage,
+                        providedDb);
+
+                if (result.WasProcessed)
+                {
+                    summary.ProcessedSheets++;
+
+                    if (!result.RevisionBlockFound)
+                    {
+                        logMessage?.Invoke(
+                            $"Warning: Revision block not found on sheet {sheet.SheetTitle}");
+                    }
+                }
+                else
+                {
+                    summary.FailedSheets++;
+                }
+
+                System.Windows.Forms.Application.DoEvents();
+            }
+
+            try
+            {
+                foreach (KeyValuePair<string, Database> kvp
+                         in openDatabases)
+                {
+                    try
+                    {
+                        kvp.Value.SaveAs(
+                            kvp.Key,
+                            kvp.Value.OriginalFileVersion);
+                    }
+                    catch (System.Exception saveEx)
+                    {
+                        logMessage?.Invoke(
+                            $"Warning: Could not save " +
+                            $"{Path.GetFileName(kvp.Key)}: " +
+                            $"{saveEx.Message}");
+                    }
+                }
+            }
+            finally
+            {
+                foreach (KeyValuePair<string, Database> kvp in openDatabases)
+                {
+                    try
+                    {
+                        kvp.Value.Dispose();
+                    }
+                    catch
+                    {
+                        // swallow dispose exceptions
+                    }
+                }
+            }
+
+            updateProgress?.Invoke(
+                totalSheets,
+                totalSheets,
+                "Complete");
+
+            return summary;
+        }
+
+        /// <summary>
+        /// Gets the hierarchical sheet set structure including subsets and sheets.
+        /// </summary>
+        /// <param name="dstFileName">The path to the sheet set (.dst) file.</param>
+        /// <returns>A list of SheetSetNode objects representing all sheets.</returns>
+        public static List<SheetSetNode> GetSheetSetHierarchy(string dstFileName)
+        {
+            if (string.IsNullOrWhiteSpace(dstFileName))
+            {
+                throw new ArgumentException(
+                    "A sheet set file was not provided.",
+                    nameof(dstFileName));
+            }
+
+            if (!File.Exists(dstFileName))
+            {
+                throw new FileNotFoundException(
+                    "The selected sheet set file was not found.",
+                    dstFileName);
+            }
+
+            IAcSmSheetSetMgr sheetSetManager = null;
+            AcSmDatabase sheetSetDatabase = null;
+
+            try
+            {
+                sheetSetManager =
+                    new AcSmSheetSetMgr();
+
+                sheetSetDatabase =
+                    sheetSetManager.OpenDatabase(
+                        dstFileName,
+                        false) as AcSmDatabase;
+
+                if (sheetSetDatabase == null)
+                {
+                    throw new InvalidOperationException(
+                        "AutoCAD could not open the selected " +
+                        "sheet set.");
+                }
+
+                IAcSmSheetSet sheetSet =
+                    sheetSetDatabase.GetSheetSet();
+
+                if (sheetSet == null)
+                {
+                    throw new InvalidOperationException(
+                        "The selected DST does not contain a " +
+                        "valid sheet set.");
+                }
+
+                IAcSmEnumComponent sheetEnumerator =
+                    sheetSet.GetSheetEnumerator();
+
+                if (sheetEnumerator == null)
+                {
+                    throw new InvalidOperationException(
+                        "AutoCAD could not enumerate the sheets " +
+                        "in the selected sheet set.");
+                }
+
+                // Build hierarchy from subsets and sheets
+                List<SheetSetNode> nodes = 
+                    BuildHierarchyFromComponents(
+                        sheetEnumerator,
+                        dstFileName);
+
+                return nodes;
+            }
+            finally
+            {
+                if (sheetSetManager != null &&
+                    sheetSetDatabase != null)
+                {
+                    try
+                    {
+                        sheetSetManager.Close(
+                            sheetSetDatabase);
+                    }
+                    catch
+                    {
+                        /*
+                         * Do not replace an earlier exception with
+                         * a COM cleanup exception.
+                         */
+                    }
+                }
+
+                ReleaseComObject(
+                    sheetSetDatabase);
+
+                ReleaseComObject(
+                    sheetSetManager);
+            }
+        }
+
+        /// <summary>
+        /// Recursively builds a hierarchy of SheetSetNode objects from AutoCAD sheet set components.
+        /// Handles both subsets (branches) and sheets (leaf nodes).
+        /// </summary>
+        private static List<SheetSetNode> BuildHierarchyFromComponents(
+            IAcSmEnumComponent enumerator,
+            string dstFileName)
+        {
+            List<SheetSetNode> nodes = new List<SheetSetNode>();
+
+            if (enumerator == null)
+            {
+                return nodes;
+            }
+
+            IAcSmComponent component;
+
+            while ((component = enumerator.Next()) != null)
+            {
+                // Try to get as a sheet first
+                IAcSmSheet sheet = component as IAcSmSheet;
+                if (sheet != null)
+                {
+                    SheetEntry sheetEntry = BuildSheetEntry(sheet, dstFileName);
+                    if (sheetEntry != null)
+                    {
+                        nodes.Add(new SheetSetNode
+                        {
+                            Name = sheetEntry.SheetTitle,
+                            Sheet = sheetEntry
+                        });
+                    }
+
+                    continue;
+                }
+
+                // Try to get as a subset (folder/category)
+                IAcSmSubset subset = component as IAcSmSubset;
+                if (subset != null)
+                {
+                    string subsetName = subset.GetName();
+
+                    // Get the enumerator for this subset's children
+                    IAcSmEnumComponent subsetEnumerator = 
+                        subset.GetSheetEnumerator();
+
+                    // Recursively build the children
+                    List<SheetSetNode> children = 
+                        BuildHierarchyFromComponents(
+                            subsetEnumerator,
+                            dstFileName);
+
+                    // Create a node for the subset (non-sheet node)
+                    nodes.Add(new SheetSetNode
+                    {
+                        Name = subsetName,
+                        Sheet = null,
+                        Children = children
+                    });
+
+                    ReleaseComObject(subsetEnumerator);
+                    continue;
+                }
+            }
+
+            return nodes;
+        }
+
+        /// <summary>
+        /// Extracts sheet information from an IAcSmSheet component and creates a SheetEntry.
+        /// Returns null if the sheet is invalid or missing required data.
+        /// </summary>
+        private static SheetEntry BuildSheetEntry(
+            IAcSmSheet sheet,
+            string dstFileName)
+        {
+            if (sheet == null)
+            {
+                return null;
+            }
+
+            IAcSmAcDbLayoutReference layoutReference =
+                sheet.GetLayout()
+                as IAcSmAcDbLayoutReference;
+
+            if (layoutReference == null)
+            {
+                return null;
+            }
+
+            string drawingFile =
+                layoutReference.GetFileName();
+
+            string layoutName =
+                layoutReference.GetName();
+
+            string sheetTitle =
+                sheet.GetTitle();
+
+            if (string.IsNullOrWhiteSpace(drawingFile) ||
+                string.IsNullOrWhiteSpace(layoutName))
+            {
+                return null;
+            }
+
+            drawingFile =
+                ResolveDrawingPath(
+                    drawingFile,
+                    dstFileName);
+
+            return new SheetEntry
+            {
+                SheetTitle =
+                    string.IsNullOrWhiteSpace(sheetTitle)
+                        ? layoutName
+                        : sheetTitle.Trim(),
+
+                DrawingFile =
+                    drawingFile,
+
+                LayoutName =
+                    layoutName.Trim()
+            };
+        }
+
         private static List<SheetEntry> GetSheets(
             string dstFileName)
         {

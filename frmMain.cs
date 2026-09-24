@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Windows.Forms;
@@ -9,6 +11,7 @@ namespace PNM_Revision_Tool
     [SupportedOSPlatform("windows")]
     public partial class frmMain : Form
     {
+        private string _currentSheetSetFile = string.Empty;
 
         public void UpdateProgress(
             int current,
@@ -95,32 +98,39 @@ namespace PNM_Revision_Tool
             cbxStamp.DropDownStyle = ComboBoxStyle.DropDownList;
         }
 
-        private void cmbCancel_Click(object sender, EventArgs e)
-        {
-            DialogResult = DialogResult.Cancel;
-            Close();
-        }
+        //private void cmbCancel_Click(object sender, EventArgs e)
+        //{
+        //    DialogResult = DialogResult.Cancel;
+        //    Close();
+        //}
 
         private void cmbApplyShtSet_Click(object sender, EventArgs e)
         {
-            using OpenFileDialog dialog =
-                new OpenFileDialog
-                {
-                    Title =
-                        "Select AutoCAD Sheet Set",
-
-                    Filter =
-                        "AutoCAD Sheet Set Files (*.dst)|*.dst",
-
-                    DefaultExt = "dst",
-                    AddExtension = true,
-                    CheckFileExists = true,
-                    CheckPathExists = true,
-                    Multiselect = false
-                };
-
-            if (dialog.ShowDialog(this) != DialogResult.OK)
+            // Check if a sheet set file has been loaded
+            if (string.IsNullOrWhiteSpace(_currentSheetSetFile))
             {
+                MessageBox.Show(
+                    this,
+                    "Please open a sheet set file first using the 'Open Sheet Set' button.",
+                    "PNM Revision Tool",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+
+                return;
+            }
+
+            // Get the checked sheets from the TreeView
+            List<SheetEntry> selectedSheets = GetCheckedSheets();
+
+            if (selectedSheets.Count == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "No sheets selected. Please select at least one sheet to process.",
+                    "PNM Revision Tool",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+
                 return;
             }
 
@@ -179,8 +189,9 @@ namespace PNM_Revision_Tool
                 txtLog.Clear();
 
                 ProcessingSummary summary =
-                    SheetSetProcessor.Process(
-                        dialog.FileName,
+                    SheetSetProcessor.ProcessSelectedSheets(
+                        _currentSheetSetFile,
+                        selectedSheets,
                         values,
                         UpdateProgress,
                         LogMessage);
@@ -264,5 +275,142 @@ namespace PNM_Revision_Tool
             return message.ToString();
         }
 
+        private void label10_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void cmbOpenSS_Click(object sender, EventArgs e)
+        {
+            using OpenFileDialog dialog =
+                new OpenFileDialog
+                {
+                    Title =
+                        "Select AutoCAD Sheet Set",
+
+                    Filter =
+                        "AutoCAD Sheet Set Files (*.dst)|*.dst",
+
+                    DefaultExt = "dst",
+                    AddExtension = true,
+                    CheckFileExists = true,
+                    CheckPathExists = true,
+                    Multiselect = false
+                };
+
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
+            try
+            {
+                UseWaitCursor = true;
+                cmbOpenSS.Enabled = false;
+
+                _currentSheetSetFile = dialog.FileName;
+
+                // Get the sheet hierarchy from the sheet set file
+                List<SheetSetNode> sheetNodes = 
+                    SheetSetProcessor.GetSheetSetHierarchy(
+                        _currentSheetSetFile);
+
+                // Populate the TreeView
+                trvSheets.Nodes.Clear();
+                PopulateTreeView(trvSheets.Nodes, sheetNodes);
+
+                LogMessage(
+                    $"Loaded sheet set: {Path.GetFileName(_currentSheetSetFile)} " +
+                    $"({sheetNodes.Count} sheets)");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    ex.Message,
+                    "PNM Revision Tool",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+
+                _currentSheetSetFile = string.Empty;
+                trvSheets.Nodes.Clear();
+            }
+            finally
+            {
+                UseWaitCursor = false;
+                cmbOpenSS.Enabled = true;
+            }
+        }
+
+        private void PopulateTreeView(TreeNodeCollection nodeCollection, List<SheetSetNode> sheetNodes)
+        {
+            foreach (SheetSetNode node in sheetNodes)
+            {
+                TreeNode treeNode = new TreeNode
+                {
+                    Text = node.Name,
+                    Tag = node.Sheet,
+                    Checked = false
+                };
+
+                if (node.Children.Count > 0)
+                {
+                    PopulateTreeView(treeNode.Nodes, node.Children);
+                }
+
+                nodeCollection.Add(treeNode);
+            }
+        }
+
+        private void cmbSelectAll_Click(object sender, EventArgs e)
+        {
+            SetAllNodesChecked(trvSheets.Nodes, true);
+        }
+
+        private void SetAllNodesChecked(TreeNodeCollection nodes, bool isChecked)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                node.Checked = isChecked;
+
+                if (node.Nodes.Count > 0)
+                {
+                    SetAllNodesChecked(node.Nodes, isChecked);
+                }
+            }
+        }
+
+        private void cmbSelectNone_Click(object sender, EventArgs e)
+        {
+            SetAllNodesChecked(trvSheets.Nodes, false);
+        }
+
+        private void trvSheets_AfterSelect(object sender, TreeViewEventArgs e)
+        {
+
+        }
+
+        private List<SheetEntry> GetCheckedSheets()
+        {
+            List<SheetEntry> checkedSheets = new List<SheetEntry>();
+            CollectCheckedSheets(trvSheets.Nodes, checkedSheets);
+            return checkedSheets;
+        }
+
+        private void CollectCheckedSheets(TreeNodeCollection nodes, List<SheetEntry> checkedSheets)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                if (node.Checked && node.Tag is SheetEntry sheet)
+                {
+                    checkedSheets.Add(sheet);
+                }
+
+                if (node.Nodes.Count > 0)
+                {
+                    CollectCheckedSheets(node.Nodes, checkedSheets);
+                }
+            }
+        }
     }
 }
