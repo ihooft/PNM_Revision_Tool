@@ -98,6 +98,63 @@ namespace PNM_Revision_Tool
             cbxStamp.DropDownStyle = ComboBoxStyle.DropDownList;
         }
 
+        //treeview behavior
+        //check all child nodes if parent node is checked
+        //uncheck all child nodes if parent node is unchecked
+        //check parent node if all child nodes are checked
+        //uncheck parent node if any child node is unchecked
+        private bool _updatingTree;
+
+        private void trvSheets_AfterCheck(object sender, TreeViewEventArgs e)
+        {
+            if (_updatingTree)
+                return;
+
+            try
+            {
+                _updatingTree = true;
+
+                // Propagate state down
+                CheckAllChildren(e.Node, e.Node.Checked);
+
+                // Propagate state up
+                UpdateParentNodes(e.Node.Parent);
+            }
+            finally
+            {
+                _updatingTree = false;
+            }
+        }
+
+        private void CheckAllChildren(TreeNode node, bool isChecked)
+        {
+            foreach (TreeNode child in node.Nodes)
+            {
+                child.Checked = isChecked;
+                CheckAllChildren(child, isChecked);
+            }
+        }
+
+        private void UpdateParentNodes(TreeNode parent)
+        {
+            while (parent != null)
+            {
+                bool allChecked = true;
+
+                foreach (TreeNode child in parent.Nodes)
+                {
+                    if (!child.Checked)
+                    {
+                        allChecked = false;
+                        break;
+                    }
+                }
+
+                parent.Checked = allChecked;
+                parent = parent.Parent;
+            }
+        }
+
         //private void cmbCancel_Click(object sender, EventArgs e)
         //{
         //    DialogResult = DialogResult.Cancel;

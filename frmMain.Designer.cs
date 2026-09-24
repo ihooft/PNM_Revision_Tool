@@ -208,7 +208,7 @@
             cmbApplyShtSet.Name = "cmbApplyShtSet";
             cmbApplyShtSet.Size = new Size(306, 23);
             cmbApplyShtSet.TabIndex = 11;
-            cmbApplyShtSet.Text = "Apply to Sheet Set";
+            cmbApplyShtSet.Text = "Apply to Selected Sheets";
             cmbApplyShtSet.UseVisualStyleBackColor = true;
             cmbApplyShtSet.Click += cmbApplyShtSet_Click;
             // 
@@ -263,6 +263,7 @@
             trvSheets.Size = new Size(287, 509);
             trvSheets.TabIndex = 27;
             trvSheets.AfterSelect += trvSheets_AfterSelect;
+            trvSheets.AfterCheck +=new TreeViewEventHandler(trvSheets_AfterCheck);
             // 
             // cmbOpenSS
             // 
