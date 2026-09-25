@@ -262,7 +262,6 @@
             trvSheets.Name = "trvSheets";
             trvSheets.Size = new Size(287, 509);
             trvSheets.TabIndex = 27;
-            trvSheets.AfterSelect += trvSheets_AfterSelect;
             trvSheets.AfterCheck +=new TreeViewEventHandler(trvSheets_AfterCheck);
             // 
             // cmbOpenSS

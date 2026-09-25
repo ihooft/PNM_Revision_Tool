@@ -1,10 +1,12 @@
+using Common.Logging;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.Versioning;
+using System.Text.RegularExpressions;
 using System.Text;
 using System.Windows.Forms;
-using System.Runtime.Versioning;
 
 namespace PNM_Revision_Tool
 {
@@ -275,6 +277,13 @@ namespace PNM_Revision_Tool
             {
                 UseWaitCursor = false;
                 cmbApplyShtSet.Enabled = true;
+
+                // Efficiency Log
+                EfficiencyLogger.Log(
+                    tool: "PNM Revision Tool",
+                    projectNumber: GetProjectNumber(_currentSheetSetFile),
+                    filesProcessed: selectedSheets.Count,
+                    itemsProcessed: 1);
             }
         }
 
@@ -442,10 +451,10 @@ namespace PNM_Revision_Tool
             SetAllNodesChecked(trvSheets.Nodes, false);
         }
 
-        private void trvSheets_AfterSelect(object sender, TreeViewEventArgs e)
-        {
+        //private void trvSheets_AfterSelect(object sender, TreeViewEventArgs e)
+        //{
 
-        }
+        //}
 
         private List<SheetEntry> GetCheckedSheets()
         {
@@ -468,6 +477,21 @@ namespace PNM_Revision_Tool
                     CollectCheckedSheets(node.Nodes, checkedSheets);
                 }
             }
+        }
+
+        //return project number from file
+        private static string GetProjectNumber(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return string.Empty;
+
+            Match match = Regex.Match(
+            filePath,
+            @"\b\d{2}\.\d{5}\b");
+
+            return match.Success
+            ? match.Value
+            : string.Empty;
         }
     }
 }
