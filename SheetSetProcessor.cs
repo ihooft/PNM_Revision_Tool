@@ -39,7 +39,8 @@ namespace PNM_Revision_Tool
             "OVCND_ATT",
             "CNDATT",
             "TBBLATT",
-            "GENATT"
+            "GENATT",
+            "TBBL"
         };
 
         private static bool IsDrawingOpen(string drawingFile)
@@ -96,6 +97,19 @@ namespace PNM_Revision_Tool
 
             int totalSheets =
                 sheets.Count;
+
+            // If any of the drawings referenced by the sheet set are
+            // currently open in AutoCAD, offer the user a chance to
+            // save and close them so they can be processed.
+            try
+            {
+                PromptToCloseOpenDrawings(
+                    sheets.Select(s => s.DrawingFile));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
 
             int currentSheet = 0;
 
@@ -303,6 +317,9 @@ namespace PNM_Revision_Tool
                     "No sheets were selected for processing.",
                     nameof(selectedSheets));
             }
+
+            PromptToCloseOpenDrawings(
+                selectedSheets.Select(sheet => sheet.DrawingFile));
 
             int totalSheets = selectedSheets.Count;
             int currentSheet = 0;
@@ -850,6 +867,100 @@ namespace PNM_Revision_Tool
                 Path.Combine(
                     sheetSetDirectory,
                     drawingFile));
+        }
+
+        /// <summary>
+        /// If any provided drawing files are open in AutoCAD, ask the
+        /// user whether the tool should save and close them before
+        /// processing.
+        /// </summary>
+        private static void PromptToCloseOpenDrawings(IEnumerable<string> drawingFiles)
+        {
+            if (drawingFiles == null)
+                return;
+
+            List<string> distinct = drawingFiles
+                .Where(f => !string.IsNullOrWhiteSpace(f))
+                .Select(Path.GetFullPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            List<Document> currentlyOpen =
+                AcAp.DocumentManager
+                    .Cast<Document>()
+                    .Where(document => distinct.Any(path =>
+                        string.Equals(
+                            Path.GetFullPath(document.Name),
+                            path,
+                            StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+
+            if (!currentlyOpen.Any())
+                return;
+
+            string list = string.Join(
+                Environment.NewLine,
+                currentlyOpen.Select(document =>
+                    Path.GetFileNameWithoutExtension(document.Name)));
+
+            string message =
+                "The following drawings are currently open in AutoCAD:" +
+                Environment.NewLine + Environment.NewLine +
+                list +
+                Environment.NewLine + Environment.NewLine +
+                "Would you like the tool to save and close these drawings so they can be processed?" +
+                Environment.NewLine +
+                "Yes = Save and close them now." +
+                Environment.NewLine +
+                "No = Skip open drawings and continue processing the rest." +
+                Environment.NewLine +
+                "Cancel = Abort the operation.";
+
+            DialogResult result = MessageBox.Show(
+                message,
+                "PNM Revision Tool",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Cancel)
+            {
+                throw new OperationCanceledException("Operation cancelled by user.");
+            }
+
+            if (result == DialogResult.No)
+            {
+                // User chose to skip open drawings; just continue.
+                return;
+            }
+
+            foreach (Document document in currentlyOpen)
+            {
+                try
+                {
+                    document.CloseAndSave(document.Name);
+                }
+                catch (System.Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        $"Could not save and close drawing " +
+                        $"'{Path.GetFileNameWithoutExtension(document.Name)}'. " +
+                        "Processing was stopped.",
+                        ex);
+                }
+            }
+
+            List<string> remainingOpen =
+                distinct.Where(IsDrawingOpen).ToList();
+
+            if (remainingOpen.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "These drawings are still open in AutoCAD, so processing " +
+                    "was stopped:" + Environment.NewLine + Environment.NewLine +
+                    string.Join(
+                        Environment.NewLine,
+                        remainingOpen.Select(Path.GetFileNameWithoutExtension)));
+            }
         }
 
         private static SheetProcessingResult ProcessSheet(
